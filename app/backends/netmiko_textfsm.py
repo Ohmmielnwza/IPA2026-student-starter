@@ -43,20 +43,29 @@ def _as_records(output):
     return output if isinstance(output, list) else []
 
 
+def _parse(conn, command):
+    """Run a command and parse it with TextFSM; return [] when absent."""
+    raw = conn.send_command(command)
+    if "Invalid input" in raw or "does not exist" in raw:
+        return raw, []
+    try:
+        parsed = conn.send_command(command, use_textfsm=True)
+    except Exception as exc:
+        if exc.__class__.__module__.startswith("textfsm"):
+            raise RuntimeError(f"TextFSM could not parse {command!r}") from exc
+        raise
+    return raw, _as_records(parsed)
+
+
 def _real_get(router, interface_name):
     from netmiko import ConnectHandler
 
     with ConnectHandler(**_device(router)) as conn:
-        ip_info = conn.send_command(
-            f"show ip interface {interface_name}", use_textfsm=True
-        )
-        descriptions = conn.send_command(
-            "show interfaces description", use_textfsm=True
-        )
-        if isinstance(descriptions, str) and descriptions.strip():
-            if "Invalid input" in descriptions:
-                raise RuntimeError("show interfaces description failed")
-    return _as_records(ip_info), _as_records(descriptions)
+        _, ip_info = _parse(conn, f"show ip interface {interface_name}")
+        raw, descriptions = _parse(conn, "show interfaces description")
+        if "Invalid input" in raw:
+            raise RuntimeError("show interfaces description failed")
+    return ip_info, descriptions
 
 
 def _real_delete(router, interface_name):
@@ -74,6 +83,8 @@ def _real_delete(router, interface_name):
 
 
 def _map_exception(exc):
+    import logging
+    logging.getLogger(__name__).warning("netmiko error: %r", exc)
     if isinstance(exc, PermissionError):
         return _error("authentication_failed")
     if isinstance(exc, (ConnectionError, TimeoutError)):

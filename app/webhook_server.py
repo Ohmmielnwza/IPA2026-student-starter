@@ -128,7 +128,8 @@ def main():
 
     def run(event):
         try:
-            handler.handle_event(event)
+            result = handler.handle_event(event)
+            logger.info('handled event, reply=%s', json.dumps(result))
         except Exception:
             logger.exception('event processing failed')
 
